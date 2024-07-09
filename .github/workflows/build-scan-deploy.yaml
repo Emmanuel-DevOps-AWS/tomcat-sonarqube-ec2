@@ -1,0 +1,60 @@
+name: Building, scanning, and deploying webapp to TomCat hosted on EC2
+
+on:
+    push:
+        branches: 
+            - main
+
+jobs:
+    build_and_upload_artifact:
+        runs-on: ubuntu-latest
+        steps:
+            - name: clone repository into GitHub Runner
+              uses: actions/checkout@v3
+
+            - name: install and setup Maven and Java within Github runner
+              uses: actions/setup-java@v3
+              with:
+                distribution: "adopt"
+                java-version: "11"
+
+            - name: build app with Apache Maven
+              run: mvn clean package
+
+            - name: Upload Maven artifact into GitHub Packages
+              uses: actions/upload-artifact@v3
+              with:
+                name: webapp
+                path: target/*.war
+
+    deploy_artifact:
+        runs-on: ubuntu-latest
+        needs: build_and_upload_artifact
+        steps:
+            - name: clone repository into Runner
+              uses: actions@checkout@v3
+
+            - name: install and setup Maven and Java within Github runner
+              uses: actions/setup-java@v3
+              with:
+                distribution: "adopt"
+                java-version: "11"
+
+            - name: download the artifact we uploaded into GitHub Packages
+              uses: actions/download-artifact@v3
+              with:
+                name: webapp
+                path: ~/
+
+            - name: run sonarqube scan against code
+              run: |
+                mvn sonar:sonar \
+                -Dsonar.projectKey=scan_code \
+                -Dsonar.host.url=http://35.170.201.213:9000 \
+                -Dsonar.login=8edefbfd5b4867d974ee47c345cf25f1459f0c3b
+            
+            - name: push into tomcat server (EC2 Instance)
+              run: |
+                echo "${{secrets.KEY_PAIR_FILE}}" > ~/key_pair.pem
+                chmod 400 ~/key_pair.pem
+                sudo scp -i ~/key_pair.pem -o StrictHostKeyChecking=no ~/*.war ec2-user@44.202.138.33:/opt/tomcat9/webapps
